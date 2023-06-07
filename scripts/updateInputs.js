@@ -9,7 +9,10 @@ const alchemyKey = process.env.ALCHEMY_API_KEY;
 const chainId = +process.env.CHAIN_ID;
 
 const extraInput = "0x7BAe1c04e5Cef0E5d635ccC0D782A21aCB920BeB";
+const zeroLeaf = "0x667764c376602b72ef22218e1673c2cc8546201f9a77807570b3e5de137680d";
+const queueSize = 2 ** 6;
 
+// getting QueueId from node arg
 function getQueueId() {
   try {
     const id = process.argv[2].split("=")[1];
@@ -18,6 +21,7 @@ function getQueueId() {
     throw new Error("please define the queueId arg, i.e. queueId=1");
   }
 }
+
 function getProvider() {
   return new ethers.AlchemyProvider(chainId, alchemyKey);
 }
@@ -110,6 +114,7 @@ function getBusTreeContract() {
   return new ethers.Contract(busTreeAddress, busTreeAbi, getProvider());
 }
 
+// Gets UTXOs by reading event based on queue id
 async function getUtxos(queueId) {
   const bussTree = getBusTreeContract();
 
@@ -134,13 +139,28 @@ async function updateInputs(queueId, inputs) {
   fs.writeFileSync(inputPath, JSON.stringify(inputs));
 }
 
+// Add zero leaves to UTXO[] to expand it to 64 elements
+function expandLeaves(leaves) {
+  const zeroLeavesLength = queueSize - leaves.length;
+  if (zeroLeavesLength == 0) return;
+
+  const expanded = [...leaves];
+
+  console.log({ expanded: expanded.length });
+  for (let index = 0; index < zeroLeavesLength; index++) {
+    expanded[leaves.length + index] = zeroLeaf;
+  }
+
+  return expanded;
+}
+
 async function main() {
   const bussTree = getBusTreeContract();
 
   const queueId = getQueueId();
 
   const root = await bussTree.busRoot();
-  const replacedNodeIndex = BigInt(await bussTree.nLeafs()) / BigInt(2 ** 6);
+  const replacedNodeIndex = BigInt(await bussTree.nLeafs()) / BigInt(queueSize);
   const newLeafsCommitment = (await bussTree.busQueues(queueId)).commitment;
   const newLeafs = await getUtxos(queueId);
   const nNonZeroNewLeafs = newLeafs.length;
@@ -153,7 +173,7 @@ async function main() {
     replacedNodeIndex: replacedNodeIndex.toString(),
     newLeafsCommitment,
     nNonZeroNewLeafs,
-    newLeafs,
+    newLeafs: expandLeaves(newLeafs),
     extraInput,
   });
 }
